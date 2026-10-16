@@ -178,6 +178,25 @@ def clean_chunk_text(text: str) -> str:
     return re.sub(r"[ \t]+\n", "\n", text).strip()
 
 
+def is_noise_chunk(text: str, min_chars: int = 25, min_words: int = 4) -> bool:
+    cleaned = clean_chunk_text(text)
+    placeholders = {"formula not decoded", "image", "empty", "no text"}
+    if not cleaned or normalize_name(cleaned) in placeholders:
+        return True
+    if not re.search(r"[^\W\d_]", cleaned):
+        return True
+    return len(cleaned) < min_chars and len(cleaned.split()) < min_words
+
+
+def find_repeated_chunks(items: Iterable[tuple[str, int | None]], min_pages: int = 3, max_chars: int = 80) -> set[str]:
+    pages: dict[str, set[int]] = defaultdict(set)
+    for text, page in items:
+        key = normalize_name(clean_chunk_text(text))
+        if key and len(key) <= max_chars and page:
+            pages[key].add(page)
+    return {k for k, p in pages.items() if len(p) >= min_pages}
+
+
 def _should_skip(label: str) -> bool:
     norm = normalize_name(label)
     for term in getattr(config, "SKIP_SECTIONS", ()):
