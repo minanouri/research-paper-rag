@@ -15,7 +15,7 @@ from llama_index.llms.ollama import Ollama
 
 import config
 
-DOI_RE = re.compile(r"(?<!\d)(10\.\d{4,9}/[^\s<>\"']+)", re.I)
+DOI_RE = re.compile(r"(?<!\d)(10\.\s*(?:\d\s*){4,9}\s*/\s*[^\s<>\"']+)", re.I)
 ARXIV_RE = re.compile(r"arXiv:\s?(\d{4}\.\d{4,5})(?:v\d+)?", re.I)
 _Y = r"(?<!\d)((?:19|20)\d{2})(?!\d)"
 YEAR_PATTERNS = (rf"date\s*of\s*publication[^.]{{0,40}}?{_Y}", 
@@ -45,7 +45,9 @@ def _meta_from_dict(d: dict) -> PaperMeta:
 
 def clean_doi(raw: str) -> str:
     raw = re.sub(r"^(https?://(dx\.)?doi\.org/|doi:\s*)", "", raw.strip(), flags=re.I)
-    return raw.rstrip(".,;:)]}>").lower()
+    raw = re.sub(r"\s+", "", raw)
+    raw = raw.rstrip(".,;:)]}>").lower()
+    return raw
 
 
 def clean_arxiv_id(raw: str) -> str:
@@ -55,19 +57,19 @@ def clean_arxiv_id(raw: str) -> str:
 
 
 def find_doi(text: str) -> str:
-    m = DOI_RE.search(text)
-    return clean_doi(m.group(1)) if m else ""
+    match = DOI_RE.search(text)
+    return clean_doi(match.group(1)) if match else ""
 
 
 def find_arxiv_id(text: str) -> str:
-    m = ARXIV_RE.search(text)
-    return m.group(1) if m else ""
+    match = ARXIV_RE.search(text)
+    return match.group(1) if match else ""
 
 
 def find_year(text: str) -> int:
     for pat in YEAR_PATTERNS:
-        if m := re.search(pat, text, re.I):
-            y = int(m.group(1))
+        if match := re.search(pat, text, re.I):
+            y = int(match.group(1))
             if 1900 <= y <= date.today().year + 1:
                 return y
     return 0
@@ -111,8 +113,8 @@ def _norm_ws(s) -> str:
 
 def _first_page(path: Path) -> tuple[str, str]:
     try:
-        import pymupdf as fitz
-        with fitz.open(str(path)) as doc:
+        import pymupdf
+        with pymupdf.open(str(path)) as doc:
             if doc.page_count == 0:
                 return "", ""
             page = doc[0]
@@ -307,3 +309,31 @@ def resolve_metadata(path: Path, refresh: bool = False) -> PaperMeta:
     meta = _apply_sidecar(meta, path)
     _save_final(meta)
     return meta
+
+
+def cite_label(authors: str, year: int) -> str:
+    names = [a.strip() for a in authors.split(";") if a.strip()]
+    last = lambda n: n.split(",")[0] if "," in n else n.split()[-1]
+    if not names:
+        label = "Unknown"
+    elif len(names) == 1:
+        label = last(names[0])
+    elif len(names) == 2:
+        label = f"{last(names[0])} & {last(names[1])}"
+    else:
+        label = f"{last(names[0])} et al."
+    return f"{label}, {year}" if year else label
+
+
+def find_paper(ref: str) -> str:
+    reg = _read_json(config.REGISTRY_PATH)
+    if ref in reg:
+        return ref
+    low = ref.lower()
+    hits = [pid for pid, m in reg.items() if low in (m["source"].lower(), Path(m["source"]).stem.lower())]
+    hits = hits or [pid for pid, m in reg.items() if low in m.get("title", "").lower()]
+    if len(hits) == 1:
+        return hits[0]
+    if not hits:
+        raise ValueError(f"No paper matches {ref!r}. Run `list` to see indexed papers.")
+    raise ValueError(f"{ref!r} is ambiguous: {', '.join(hits)}")
