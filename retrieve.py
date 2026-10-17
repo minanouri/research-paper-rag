@@ -1,3 +1,6 @@
+from functools import lru_cache
+
+from llama_index.core.postprocessor import SentenceTransformerRerank
 from llama_index.core.retrievers import QueryFusionRetriever
 from llama_index.core.vector_stores import FilterOperator, MetadataFilter, MetadataFilters
 from llama_index.retrievers.bm25 import BM25Retriever
@@ -5,6 +8,11 @@ from llama_index.retrievers.bm25 import BM25Retriever
 import config
 from index import get_index, load_docstore
 from metadata import get_llm
+
+
+@lru_cache
+def reranker():
+    return SentenceTransformerRerank(model=config.RERANK_MODEL, top_n=config.RERANK_TOP_N, device=config.DEVICE)
 
 
 def _matches(meta: dict, paper_id, section_type, year_min) -> bool:
@@ -39,4 +47,4 @@ def retrieve(query: str, paper_id: str | None = None, section_type: str | None =
                                   mode="reciprocal_rerank", 
                                   use_async=False, 
                                   llm=get_llm())
-    return fusion.retrieve(query)
+    return reranker().postprocess_nodes(fusion.retrieve(query), query_str=query)
