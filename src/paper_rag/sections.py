@@ -6,7 +6,7 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass
 from typing import Iterable
 
-import config
+from . import config
 
 
 SECTION_TYPES = ("front_matter", "abstract", "introduction", "related_work", "background", 

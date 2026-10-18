@@ -1,8 +1,8 @@
 from llama_index.core.llms import ChatMessage
 
-from metadata import get_llm, cite_label
-from retrieve import retrieve
-import config
+from .metadata import get_llm, cite_label
+from .retrieve import retrieve
+from . import config
 
 
 SYSTEM = """You answer questions about research papers using ONLY the numbered excerpts provided in the user's message.

@@ -6,8 +6,8 @@ from llama_index.core.storage.docstore import SimpleDocumentStore
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from llama_index.vector_stores.chroma import ChromaVectorStore
 
-import config
-from metadata import PaperMeta, load_registry
+from . import config
+from .metadata import PaperMeta, load_registry
 
 
 @lru_cache

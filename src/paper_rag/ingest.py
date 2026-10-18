@@ -4,9 +4,9 @@ from llama_index.core.node_parser import SentenceSplitter
 from llama_index.node_parser.docling import DoclingNodeParser
 from llama_index.readers.docling import DoclingReader
 
-import config
-from metadata import PaperMeta, resolve_metadata
-from sections import SectionTracker, build_casing_vocab, clean_chunk_text, find_repeated_chunks, is_noise_chunk, normalize_name
+from . import config
+from .metadata import PaperMeta, resolve_metadata
+from .sections import SectionTracker, build_casing_vocab, clean_chunk_text, find_repeated_chunks, is_noise_chunk, normalize_name
 
 
 EMBED_KEYS = {"title", "section", "subsection"}

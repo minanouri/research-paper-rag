@@ -2,8 +2,8 @@ import argparse
 import sys
 from pathlib import Path
 
-import config
-from sections import SECTION_TYPES
+from . import config
+from .sections import SECTION_TYPES
 
 
 def cmd_ingest(args):

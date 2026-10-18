@@ -5,9 +5,9 @@ from llama_index.core.retrievers import QueryFusionRetriever
 from llama_index.core.vector_stores import FilterOperator, MetadataFilter, MetadataFilters
 from llama_index.retrievers.bm25 import BM25Retriever
 
-import config
-from index import get_index, load_docstore
-from metadata import get_llm
+from . import config
+from .index import get_index, load_docstore
+from .metadata import get_llm
 
 
 @lru_cache

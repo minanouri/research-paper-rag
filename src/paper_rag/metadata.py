@@ -13,7 +13,7 @@ from pathlib import Path
 from functools import lru_cache
 from llama_index.llms.ollama import Ollama
 
-import config
+from . import config
 
 DOI_RE = re.compile(r"(?<!\d)(10\.\s*(?:\d\s*){4,9}\s*/\s*[^\s<>\"']+)", re.I)
 ARXIV_RE = re.compile(r"arXiv:\s?(\d{4}\.\d{4,5})(?:v\d+)?", re.I)
