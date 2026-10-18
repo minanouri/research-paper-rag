@@ -311,20 +311,6 @@ def resolve_metadata(path: Path, refresh: bool = False) -> PaperMeta:
     return meta
 
 
-def cite_label(authors: str, year: int) -> str:
-    names = [a.strip() for a in authors.split(";") if a.strip()]
-    last = lambda n: n.split(",")[0] if "," in n else n.split()[-1]
-    if not names:
-        label = "Unknown"
-    elif len(names) == 1:
-        label = last(names[0])
-    elif len(names) == 2:
-        label = f"{last(names[0])} & {last(names[1])}"
-    else:
-        label = f"{last(names[0])} et al."
-    return f"{label}, {year}" if year else label
-
-
 def find_paper(ref: str) -> str:
     reg = _read_json(config.REGISTRY_PATH)
     if ref in reg:
