@@ -8,8 +8,30 @@ import config
 SYSTEM = """You answer questions about research papers using ONLY the numbered excerpts provided in the user's message."""
 
 
+def cite_label(authors: str, year: int) -> str:
+    names = [a.strip() for a in authors.split(";") if a.strip()]
+    last = lambda n: n.split(",")[0] if "," in n else n.split()[-1]
+    if not names:
+        label = "Unknown"
+    elif len(names) == 1:
+        label = last(names[0])
+    elif len(names) == 2:
+        label = f"{last(names[0])} & {last(names[1])}"
+    else:
+        label = f"{last(names[0])} et al."
+    return f"{label}, {year}" if year else label
+
+
+def source_line(meta: dict) -> str:
+    sec = meta.get("section", "")
+    if meta.get("subsection"):
+        sec += f" > {meta['subsection']}"
+    source = f"{cite_label(meta.get('authors', ''), meta.get('year', 0))} | \"{meta.get('title') or meta.get('source')}\" | {sec} | p.{meta.get('page')}"
+    return source
+
+
 def build_context(nodes) -> str:
-    context = "\n\n".join(f"[{i}] {n.node.get_content()}" for i, n in enumerate(nodes, 1))
+    context = "\n\n".join(f"[{i}] {source_line(n.node.metadata)}\n{n.node.get_content()}" for i, n in enumerate(nodes, 1))
     return context
 
 
