@@ -53,6 +53,13 @@ def cmd_ask(args):
         print(f"  [{i}] {source_line(n.node.metadata)}")
 
 
+def cmd_list(_):
+    from index import list_papers
+
+    for m in sorted(list_papers(), key=lambda m: (m.get("year", 0), m["paper_id"])):
+        print(f"{m['paper_id']}  {m.get('year') or '?'}  {m.get('title') or m['source']}  ({m['chunks']} chunks)")
+
+
 def main():
     p = argparse.ArgumentParser(prog="paper-rag")
     sub = p.add_subparsers(required=True)
@@ -68,6 +75,9 @@ def main():
     q.add_argument("--section-type", choices=SECTION_TYPES, help="Restrict to a section type, e.g. methods")
     q.add_argument("--year-min", type=int, help="Only papers published in or after this year")
     q.set_defaults(fn=cmd_ask)
+
+    l = sub.add_parser("list", help="List indexed papers")
+    l.set_defaults(fn=cmd_list)
 
     args = p.parse_args()
     sys.exit(args.fn(args) or 0)
