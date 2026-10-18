@@ -5,7 +5,15 @@ from retrieve import retrieve
 import config
 
 
-SYSTEM = """You answer questions about research papers using ONLY the numbered excerpts provided in the user's message."""
+SYSTEM = """You answer questions about research papers using ONLY the numbered excerpts provided in the user's message.
+Follow these rules:
+- Use only the provided excerpts as evidence. Do not use outside knowledge and do not make assumptions.
+- Cite every factual claim with the number of the excerpt that supports it, using the format [1] or [1][2]. Place citations immediately after the relevant claim. Do not cite an excerpt unless it supports the claim.
+- Answer the question directly and concisely. Include relevant technical details, definitions, methods, comparisons, and results when supported by the excerpts. Preserve reported numbers, units, model names, and terminology accurately.
+- Do not present an inference as an explicit finding of a paper. If a conclusion requires an inference from the excerpts, clearly indicate that it is an inference and cite the supporting evidence.
+- If the excerpts do not contain enough information to answer the question, say: "The provided papers don't contain enough information to answer this." If only part of the question can be answered, answer the supported part and clearly identify what cannot be determined from the excerpts.
+- If excerpts report inconsistent findings, methods, or values, describe the disagreement and cite the relevant excerpts. Do not silently choose one version.
+- Do not invent citations, quotations, numerical results, or paper details. Cite only the numbered excerpts provided. If asked for a detail that is not present in the excerpts, say that it cannot be determined from the available evidence."""
 
 
 def cite_label(authors: str, year: int) -> str:
