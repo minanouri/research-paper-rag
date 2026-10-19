@@ -7,7 +7,7 @@ from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from llama_index.vector_stores.chroma import ChromaVectorStore
 
 from . import config
-from .metadata import PaperMeta, load_registry
+from .metadata import PaperMeta, read_json
 
 
 @lru_cache
@@ -61,4 +61,4 @@ def list_papers() -> list[dict]:
     for node in load_docstore().docs.values():
         pid = node.metadata.get("paper_id", "?")
         counts[pid] = counts.get(pid, 0) + 1
-    return [{**m, "chunks": counts.get(pid, 0)} for pid, m in load_registry().items()]
+    return [{**m, "chunks": counts.get(pid, 0)} for pid, m in read_json(config.REGISTRY_PATH).items()]

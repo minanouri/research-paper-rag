@@ -280,7 +280,7 @@ def _apply_sidecar(meta: PaperMeta, path: Path) -> PaperMeta:
 
 
 # Save/load metadata
-def _read_json(path: Path) -> dict:
+def read_json(path: Path) -> dict:
     return json.loads(path.read_text()) if path.exists() else {}
 
 
@@ -290,7 +290,7 @@ def _write_json(path: Path, obj: dict) -> None:
 
 
 def _save_final(meta: PaperMeta) -> None:
-    reg = {k: v for k, v in _read_json(config.REGISTRY_PATH).items() if v.get("content_hash") != meta.content_hash}
+    reg = {k: v for k, v in read_json(config.REGISTRY_PATH).items() if v.get("content_hash") != meta.content_hash}
     reg[meta.paper_id] = asdict(meta)
     _write_json(config.REGISTRY_PATH, reg)
 
@@ -298,7 +298,7 @@ def _save_final(meta: PaperMeta) -> None:
 def resolve_metadata(path: Path, refresh: bool = False) -> PaperMeta:
     path = Path(path)
     content_hash = file_sha256(path)
-    cache = _read_json(config.META_CACHE_PATH)
+    cache = read_json(config.META_CACHE_PATH)
     if content_hash in cache and not refresh:
         meta = _meta_from_dict(cache[content_hash])
     else:
@@ -312,7 +312,7 @@ def resolve_metadata(path: Path, refresh: bool = False) -> PaperMeta:
 
 
 def find_paper(ref: str) -> str:
-    reg = _read_json(config.REGISTRY_PATH)
+    reg = read_json(config.REGISTRY_PATH)
     if ref in reg:
         return ref
     low = ref.lower()
