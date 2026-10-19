@@ -1,6 +1,6 @@
 from llama_index.core.llms import ChatMessage
 
-from .metadata import get_llm, cite_label
+from .metadata import get_llm
 from .retrieve import retrieve
 from . import config
 

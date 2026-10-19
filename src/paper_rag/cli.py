@@ -7,8 +7,8 @@ from .sections import SECTION_TYPES
 
 
 def cmd_ingest(args):
-    from index import add_paper
-    from ingest import parse_pdf
+    from .index import add_paper
+    from .ingest import parse_pdf
 
     target = Path(args.path)
     pdfs = sorted(target.glob("*.pdf")) if target.is_dir() else [target]
@@ -38,8 +38,8 @@ def cmd_ingest(args):
 
 
 def cmd_ask(args):
-    from generate import ask, source_line
-    from metadata import find_paper
+    from .generate import ask, source_line
+    from .metadata import find_paper
 
     try:
         paper_id = find_paper(args.paper) if args.paper else None
@@ -54,7 +54,7 @@ def cmd_ask(args):
 
 
 def cmd_list(_):
-    from index import list_papers
+    from .index import list_papers
 
     for m in sorted(list_papers(), key=lambda m: (m.get("year", 0), m["paper_id"])):
         print(f"{m['paper_id']}  {m.get('year') or '?'}  {m.get('title') or m['source']}  ({m['chunks']} chunks)")
