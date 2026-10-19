@@ -6,7 +6,7 @@ DEVICE = "mps" if torch.backends.mps.is_available() else ("cuda" if torch.cuda.i
 
 ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = ROOT / "data"
-PDF_DIR = DATA_DIR / "pdfs"
+PDF_DIR = ROOT / "papers"
 CHROMA_DIR = DATA_DIR / "chroma"
 DOCSTORE_PATH = DATA_DIR / "docstore.json"
 REGISTRY_PATH = DATA_DIR / "papers.json"
