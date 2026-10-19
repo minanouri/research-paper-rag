@@ -1,0 +1,12 @@
+llama-index-core>=0.12
+llama-index-llms-ollama
+llama-index-embeddings-huggingface
+llama-index-vector-stores-chroma
+llama-index-retrievers-bm25
+llama-index-readers-docling
+llama-index-node-parser-docling
+chromadb
+sentence-transformers
+docling
+pymupdf
+torch
