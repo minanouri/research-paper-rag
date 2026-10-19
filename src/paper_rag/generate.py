@@ -1,4 +1,5 @@
 from llama_index.core.llms import ChatMessage
+import re
 
 from .metadata import get_llm
 from .retrieve import retrieve
@@ -7,13 +8,12 @@ from . import config
 
 SYSTEM = """You answer questions about research papers using ONLY the numbered excerpts provided in the user's message.
 Follow these rules:
-- Use only the provided excerpts as evidence. Do not use outside knowledge and do not make assumptions.
-- Cite every factual claim with the number of the excerpt that supports it, using the format [1] or [1][2]. Place citations immediately after the relevant claim. Do not cite an excerpt unless it supports the claim.
-- Answer the question directly and concisely. Include relevant technical details, definitions, methods, comparisons, and results when supported by the excerpts. Preserve reported numbers, units, model names, and terminology accurately.
-- Do not present an inference as an explicit finding of a paper. If a conclusion requires an inference from the excerpts, clearly indicate that it is an inference and cite the supporting evidence.
-- If the excerpts do not contain enough information to answer the question, say: "The provided papers don't contain enough information to answer this." If only part of the question can be answered, answer the supported part and clearly identify what cannot be determined from the excerpts.
-- If excerpts report inconsistent findings, methods, or values, describe the disagreement and cite the relevant excerpts. Do not silently choose one version.
-- Do not invent citations, quotations, numerical results, or paper details. Cite only the numbered excerpts provided. If asked for a detail that is not present in the excerpts, say that it cannot be determined from the available evidence."""
+- Use only the supplied excerpts to answer the question.
+- Cite supporting claims using the exact numeric IDs provided, such as [1] or [2, 3].
+- Never invent citation IDs or cite sources that do not support the claim.
+- Place citations immediately after the claims they support.
+- If the excerpts do not provide enough evidence, state that clearly.
+- If the excerpts conflict, explain the disagreement and cite both sides."""
 
 
 def cite_label(authors: str, year: int) -> str:
@@ -31,11 +31,70 @@ def cite_label(authors: str, year: int) -> str:
 
 
 def source_line(meta: dict) -> str:
-    sec = meta.get("section", "")
-    if meta.get("subsection"):
-        sec += f" > {meta['subsection']}"
-    source = f"{cite_label(meta.get('authors', ''), meta.get('year', 0))} | \"{meta.get('title') or meta.get('source')}\" | {sec} | p.{meta.get('page')}"
-    return source
+    citation = cite_label(str(meta.get("authors") or ""), meta.get("year") or 0)
+    title = meta.get("title") or meta.get("source") or "Unknown title"
+
+    sections = [value for value in (meta.get("section"), meta.get("subsection")) if value]
+    section = " -> ".join(sections) or "Unknown section"
+
+    page = meta.get("page")
+    page_text = f"p. {page}" if page is not None else "page unknown"
+
+    return f'{citation} | "{title}" | {section} | {page_text}'
+
+
+def extract_citations(answer: str) -> list[int]:
+    found = re.findall(r"\[(\d+(?:\s*,\s*\d+)*)\]", answer)
+    citation_ids = []
+    seen = set()
+
+    for group in found:
+        for value in group.split(","):
+            citation_id = int(value.strip())
+            if citation_id not in seen:
+                seen.add(citation_id)
+                citation_ids.append(citation_id)
+
+    return citation_ids
+
+
+def deduplicate_citations(sources, cited_ids: list[int]):
+    unique_sources = []
+    citation_map = {}
+    metadata_keys = {}
+
+    for old_id in cited_ids:
+        node = sources[old_id - 1]
+        meta = node.node.metadata
+
+        key = tuple(str(meta.get(field) or "").strip().casefold() for field in ("authors", "year", "title", "source", "section", "subsection", "page"))
+
+        if key not in metadata_keys:
+            new_id = len(unique_sources) + 1
+            metadata_keys[key] = new_id
+            unique_sources.append(node)
+
+        citation_map[old_id] = metadata_keys[key]
+
+    return unique_sources, citation_map
+
+
+def remap_citations(answer: str, citation_map: dict[int, int]) -> str:
+    def replace(match):
+        old_ids = [int(value.strip()) for value in match.group(1).split(",")]
+
+        new_ids = []
+        for old_id in old_ids:
+            new_id = citation_map.get(old_id)
+            if new_id is not None and new_id not in new_ids:
+                new_ids.append(new_id)
+
+        if not new_ids:
+            return match.group(0)
+
+        return "[" + ", ".join(map(str, new_ids)) + "]"
+
+    return re.sub(r"\[(\d+(?:\s*,\s*\d+)*)\]", replace, answer)
 
 
 def build_context(nodes) -> str:
