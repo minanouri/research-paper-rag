@@ -37,18 +37,24 @@ def cmd_ingest(args):
     print("Paper(s) ingested and indexed successfully.")
 
 
-def cmd_ask(args):
-    from .generate import ask, source_line, extract_citations, deduplicate_citations, remap_citations
+def _resolve_paper(ref: str | None) -> str | None:
     from .metadata import find_paper
 
     try:
-        paper_id = find_paper(args.paper) if args.paper else None
+        return find_paper(ref) if ref else None
     except ValueError as e:
         sys.exit(str(e))
 
-    tokens, sources = ask(args.question, paper_id, args.section_type, args.year_min)
 
-    answer = "".join(tokens for tokens in tokens)
+def answer_question(question: str, paper_id: str | None, args) -> None:
+    from .generate import ask, source_line, extract_citations, deduplicate_citations, remap_citations
+
+    tokens, sources = ask(question, paper_id, args.section_type, args.year_min)
+
+    answer = "".join(tokens)
+    if not sources:
+        print(answer)
+        return
     cited_ids = extract_citations(answer)
     valid_ids = [i for i in cited_ids if 1 <= i <= len(sources)]
 
@@ -75,6 +81,38 @@ def cmd_ask(args):
             print(f"  [{new_id}] {source_line(node.node.metadata)}")
 
 
+def cmd_ask(args):
+    answer_question(args.question, _resolve_paper(args.paper), args)
+
+
+def cmd_chat(args):
+    from .index import embed_model
+    from .retrieve import reranker
+
+    paper_id = _resolve_paper(args.paper)
+    print("Loading models ...")
+    embed_model()
+    reranker()
+    print("Ready. Ask a question, or type 'exit' to quit (Ctrl-C stops an answer).")
+
+    while True:
+        try:
+            question = input("\n> ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            break
+        if not question:
+            continue
+        if question.lower() in ("exit", "quit"):
+            break
+        try:
+            answer_question(question, paper_id, args)
+        except KeyboardInterrupt:
+            print("\n(answer stopped)")
+        except Exception as e:
+            print(f"Error: {e}")
+
+
 def cmd_list(_):
     from .index import list_papers
 
@@ -91,13 +129,18 @@ def main():
     a.add_argument("--refresh-meta", action="store_true", help="Re-run Crossref/LLM metadata extraction")
     a.set_defaults(fn=cmd_ingest)
 
-    q = sub.add_parser("ask", help="Ask a question")
+    filters = argparse.ArgumentParser(add_help=False)
+    filters.add_argument("--paper", help="paper_id, PDF filename, or unique title substring")
+    filters.add_argument("--section-type", choices=SECTION_TYPES, help="Restrict to a section type, e.g. methods")
+    filters.add_argument("--year-min", type=int, help="Only papers published in or after this year")
+    filters.add_argument("--show-retrieved", action="store_true", help="Show all retrieved sources, not just cited ones")
+
+    q = sub.add_parser("ask", parents=[filters], help="Ask a question")
     q.add_argument("question")
-    q.add_argument("--paper", help="paper_id, PDF filename, or unique title substring")
-    q.add_argument("--section-type", choices=SECTION_TYPES, help="Restrict to a section type, e.g. methods")
-    q.add_argument("--year-min", type=int, help="Only papers published in or after this year")
-    q.add_argument("--show-retrieved", action="store_true", help="Show all retrieved sources, not just cited ones")
     q.set_defaults(fn=cmd_ask)
+
+    c = sub.add_parser("chat", parents=[filters], help="Ask several questions, loading the models only once")
+    c.set_defaults(fn=cmd_chat)
 
     l = sub.add_parser("list", help="List indexed papers")
     l.set_defaults(fn=cmd_list)

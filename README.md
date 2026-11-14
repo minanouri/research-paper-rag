@@ -82,6 +82,16 @@ PYTHONPATH=src python -m paper_rag ask "<your-question>" --section-type <section
 PYTHONPATH=src python -m paper_rag ask "<your-question>" --year-min <year>
 ```
 
+### Chat
+
+Ask several questions in one session, loading the models only once:
+
+```bash
+PYTHONPATH=src python -m paper_rag chat
+```
+
+It accepts the same filters as `ask`. Type `exit` to quit.
+
 ### List Indexed Papers
 
 ```bash

@@ -1,8 +1,14 @@
+import os
 from pathlib import Path
+
 import torch
 
+# Use cached HF models only (no update check). Set HF_HUB_OFFLINE=0 to download new models.
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
 
 DEVICE = "mps" if torch.backends.mps.is_available() else ("cuda" if torch.cuda.is_available() else "cpu")
+# Half precision for the embedder and reranker on GPU (about half the memory); CPU stays fp32
+USE_FP16 = DEVICE != "cpu"
 
 ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = ROOT / "data"

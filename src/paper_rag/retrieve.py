@@ -12,7 +12,11 @@ from .metadata import get_llm
 
 @lru_cache
 def reranker():
-    return SentenceTransformerRerank(model=config.RERANK_MODEL, top_n=config.RERANK_TOP_N, device=config.DEVICE)
+    rr = SentenceTransformerRerank(model=config.RERANK_MODEL, top_n=config.RERANK_TOP_N, device=config.DEVICE)
+    if config.USE_FP16:
+        # SentenceTransformerRerank has no dtype option, so cast its CrossEncoder directly
+        rr._model.half()
+    return rr
 
 
 def _matches(meta: dict, paper_id, section_type, year_min) -> bool:

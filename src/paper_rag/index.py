@@ -1,6 +1,7 @@
 from functools import lru_cache
 
 import chromadb
+import torch
 from llama_index.core import VectorStoreIndex
 from llama_index.core.storage.docstore import SimpleDocumentStore
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
@@ -12,7 +13,9 @@ from .metadata import PaperMeta, read_json
 
 @lru_cache
 def embed_model():
-    return HuggingFaceEmbedding(model_name=config.EMBED_MODEL, device=config.DEVICE, embed_batch_size=16)
+    model_kwargs = {"dtype": torch.float16} if config.USE_FP16 else {}
+    return HuggingFaceEmbedding(model_name=config.EMBED_MODEL, device=config.DEVICE, embed_batch_size=16,
+                                model_kwargs=model_kwargs)
 
 
 def load_docstore() -> SimpleDocumentStore:
