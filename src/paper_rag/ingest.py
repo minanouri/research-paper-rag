@@ -6,7 +6,8 @@ from llama_index.readers.docling import DoclingReader
 
 from . import config
 from .metadata import PaperMeta, resolve_metadata
-from .sections import SectionTracker, build_casing_vocab, clean_chunk_text, find_repeated_chunks, is_noise_chunk, normalize_name
+from .sections import (SectionTracker, build_casing_vocab, clean_chunk_text, find_repeated_chunks, has_numbered_headings,
+                       is_noise_chunk, normalize_name)
 
 
 EMBED_KEYS = {"title", "section", "subsection"}
@@ -29,12 +30,13 @@ def parse_pdf(path: Path, refresh_meta: bool = False) -> tuple[PaperMeta, list]:
         items.append((node, dl.get("headings") or [], node.get_content(), _first_page(dl)))
 
     nested = any(len(headings) >= 2 for _, headings, _, _ in items)
+    numbered = has_numbered_headings(h for _, headings, _, _ in items for h in headings)
 
     repeated = find_repeated_chunks((text, page) for _, _, text, page in items)
 
     # Chunk-level metadata from the document structure
     vocab = build_casing_vocab(text for _, _, text, _ in items)
-    tracker = SectionTracker(nested=nested, vocab=vocab)
+    tracker = SectionTracker(nested=nested, vocab=vocab, numbered=numbered)
     kept = []
     for node, headings, text, page in items:
         info = tracker.update(headings, text, page)

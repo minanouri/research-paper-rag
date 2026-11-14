@@ -29,7 +29,8 @@ CHUNK_SIZE = 512
 CHUNK_OVERLAP = 64
 SKIP_SECTIONS = ("references", "bibliography", 
                  "acknowledgment", "acknowledgments", "acknowledgement", "acknowledgements", 
-                 "declaration of competing interest", "declarations of competing interest", 
+                 "declaration of competing interest", "declarations of competing interest",
+                 "declaration of conflicting interests", "declarations of conflicting interests", "orcid ids",
                  "conflict of interest", "conflicts of interest", 
                  "credit authorship contribution statement", "author contributions")
 

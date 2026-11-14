@@ -20,6 +20,11 @@ RE_LETTER_DECIMAL = re.compile(r"^\s*([A-Z](?:\.\d+)+)\.?\s+(\S.*)$")
 RE_DECIMAL = re.compile(r"^\s*(\d+(?:\.\d+)*)\.?\s+(\S.*)$")
 RE_PAREN = re.compile(r"^\s*(\d+)\)\s+(\S.*)$")
 RE_APPENDIX = re.compile(r"^\s*(?:[A-Z]\.?\s+)?(?:appendix|appendices|supplementary|supplemental)\b", re.I)
+RE_PSEUDOCODE = re.compile(r"^\s*end\s*(?:for|while|if|function|procedure)\b", re.I)
+
+# Headings that belong to the title page rather than the body (e.g. "Keywords" right after the abstract)
+_KEYWORD_MARKERS = ("keywords", "key words", "index terms")
+_FRONT_MATTER_MARKERS = (*_KEYWORD_MARKERS, "corresponding author", "article info", "article history")
 
 TOP_LEVEL_NAMES = ("abstract", "introduction", "motivation", "background", "preliminaries", "related work", 
                    "related works", "literature review", "methods", "method", "methodology", "materials and methods", 
@@ -28,7 +33,8 @@ TOP_LEVEL_NAMES = ("abstract", "introduction", "motivation", "background", "prel
                    "future work", "acknowledgment", "acknowledgments", "acknowledgement", "acknowledgements", 
                    "references", "bibliography", "appendix", "appendices", "supplementary material", 
                    "supplementary materials", "declaration of competing interest", "declarations of competing interest", 
-                   "conflict of interest", "conflicts of interest", "credit authorship contribution statement", 
+                   "declaration of conflicting interests", "declarations of conflicting interests",
+                   "conflict of interest", "conflicts of interest", "credit authorship contribution statement",
                    "author contributions", "data availability", "funding")
 
 _TYPE_KEYWORDS = (("abstract", ("abstract",)), 
@@ -37,7 +43,7 @@ _TYPE_KEYWORDS = (("abstract", ("abstract",)),
                   ("related_work", ("related work", "literature", "prior work", "previous work", "state of the art")), 
                   ("background", ("preliminar", "background", "foundation", "notation")), 
                   ("conclusion", ("conclusion", "concluding", "future work", "future research", "future direction", "summary")), 
-                  ("experiments", ("experiment", "evaluation", "implementation", "result", "empirical", "case study", 
+                  ("experiments", ("experiment", "evaluation", "implementation", "result", "empirical", "case study", "application",
                                    "dataset", "performance", "benchmark", "ablation")), 
                   ("discussion", ("discussion", "limitation", "implication", "threats to validity")), 
                   ("methods", ("method", "approach", "model", "proposed", "framework", "architecture", "algorithm", 
@@ -161,6 +167,18 @@ def classify_heading(text: str, roman_idx: int = 0) -> tuple[int, str, int]:
     return 0, raw, 0
 
 
+def has_numbered_headings(headings: Iterable[str], min_count: int = 2) -> bool:
+    """True if the document numbers its headings (1., 2.1, II., A.1, 1)), so levels can be read from the numbers."""
+    patterns = (RE_DECIMAL, RE_ROMAN, RE_LETTER_DECIMAL, RE_PAREN)
+    numbered = {h for h in headings if any(p.match(h) for p in patterns)}
+    return len(numbered) >= min_count
+
+
+def _is_marker(label: str, markers: tuple[str, ...]) -> bool:
+    norm = normalize_name(label)
+    return any(norm == m or norm.startswith(m + " ") for m in markers)
+
+
 def section_type_of(*labels: str) -> str:
     for label in labels:
         low = label.lower()
@@ -215,25 +233,38 @@ class SectionInfo:
 
 
 class SectionTracker:
-    def __init__(self, nested: bool | None = None, vocab: dict[str, str] | None = None):
+    def __init__(self, nested: bool | None = None, vocab: dict[str, str] | None = None, numbered: bool = True):
         self.nested = nested
         self.vocab = vocab
+        # False for papers whose headings are flat and unnumbered, so an unknown heading is a new section
+        self.numbered = numbered
         self.section = FRONT_MATTER
         self.sub = ""
         self.sub2 = ""
         self.roman = 0
         self.skipping = False
+        self.keywords_pending = False
         self.last: list[str] = []
 
     def _fallback_level(self, index: int, nested: bool, page: int | None) -> int:
         if self.section == FRONT_MATTER:
             return 1 if (page or 0) >= 2 else 0
-        return min(index + 1, 3) if nested else 2
+        if nested:
+            return min(index + 1, 3)
+        return 2 if self.numbered else 1
 
     def _apply(self, heading: str, index: int, nested: bool, page: int | None) -> None:
+        if RE_PSEUDOCODE.match(heading):
+            return
         level, label, roman_value = classify_heading(heading, self.roman)
         label = pretty_label(restore_spacing(label), self.vocab)
         if not label:
+            return
+        if _is_marker(label, _FRONT_MATTER_MARKERS):
+            # The keyword list is front matter; body text that follows it without its own heading is the introduction
+            self.keywords_pending = _is_marker(label, _KEYWORD_MARKERS)
+            if section_type_of(self.section) == "abstract":
+                self.section, self.sub, self.sub2 = "Introduction", "", ""
             return
         if level == 0:
             level = self._fallback_level(index, nested, page)
@@ -269,6 +300,9 @@ class SectionTracker:
         return self._info(text)
 
     def _info(self, text: str) -> SectionInfo:
+        if self.keywords_pending:
+            self.keywords_pending = False
+            return SectionInfo(FRONT_MATTER, "", "front_matter", False)
         if self.section == FRONT_MATTER:
             if re.match(r"\W*abstract\b", clean_chunk_text(text)[:60], re.I):
                 return SectionInfo("Abstract", "", "abstract", False)
