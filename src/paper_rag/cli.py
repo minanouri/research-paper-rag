@@ -47,37 +47,40 @@ def _resolve_paper(ref: str | None) -> str | None:
 
 
 def answer_question(question: str, paper_id: str | None, args) -> None:
-    from .generate import ask, source_line, extract_citations, deduplicate_citations, remap_citations
+    from .generate import CitationRenumberer, ask, extract_citations, source_line
 
     tokens, sources = ask(question, paper_id, args.section_type, args.year_min)
-
-    answer = "".join(tokens)
     if not sources:
-        print(answer)
+        print("".join(tokens))
         return
-    cited_ids = extract_citations(answer)
-    valid_ids = [i for i in cited_ids if 1 <= i <= len(sources)]
 
     if args.show_retrieved:
-        print(answer)
+        # Print the answer as it streams, keeping the excerpt numbers the model used
+        answer = ""
+        for token in tokens:
+            print(token, end="", flush=True)
+            answer += token
+        print()
+        cited_ids = extract_citations(answer)
         print("\nRetrieved sources:")
 
         for i, node in enumerate(sources, 1):
-            status = " (cited)" if i in valid_ids else " (not cited)"
+            status = " (cited)" if i in cited_ids else " (not cited)"
             print(f"  [{i}] {source_line(node.node.metadata)}{status}")
 
     else:
-        unique_sources, citation_map = deduplicate_citations(sources, valid_ids)
-        answer = remap_citations(answer, citation_map)
-
-        print(answer)
+        # Print the answer as it streams, renumbering citations to match the cited sources list
+        renumberer = CitationRenumberer(sources)
+        for token in tokens:
+            print(renumberer.feed(token), end="", flush=True)
+        print(renumberer.flush())
         print("\nCited sources:")
 
-        if not unique_sources:
+        if not renumberer.unique_sources:
             print("  No valid inline citations were found in the answer.")
             return
 
-        for new_id, node in enumerate(unique_sources, 1):
+        for new_id, node in enumerate(renumberer.unique_sources, 1):
             print(f"  [{new_id}] {source_line(node.node.metadata)}")
 
 

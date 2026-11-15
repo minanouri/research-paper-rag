@@ -43,8 +43,13 @@ def source_line(meta: dict) -> str:
     return f'{citation} | "{title}" | {section} | {page_text}'
 
 
+CITATION_RE = re.compile(r"\[(\d+(?:\s*,\s*\d+)*)\]")
+# The end of streamed text that may still become a citation, e.g. "[2" or "[1, "
+PARTIAL_CITATION_RE = re.compile(r"\[[\d,\s]*$")
+
+
 def extract_citations(answer: str) -> list[int]:
-    found = re.findall(r"\[(\d+(?:\s*,\s*\d+)*)\]", answer)
+    found = CITATION_RE.findall(answer)
     citation_ids = []
     seen = set()
 
@@ -58,43 +63,54 @@ def extract_citations(answer: str) -> list[int]:
     return citation_ids
 
 
-def deduplicate_citations(sources, cited_ids: list[int]):
-    unique_sources = []
-    citation_map = {}
-    metadata_keys = {}
+class CitationRenumberer:
+    """Renumber citations while the answer streams in.
 
-    for old_id in cited_ids:
-        node = sources[old_id - 1]
-        meta = node.node.metadata
+    Cited excerpts that share a source (same paper, section and page) get one number, and numbers
+    follow the order of first citation. Text after an unclosed "[" is held back until it can be decided.
+    """
 
-        key = tuple(str(meta.get(field) or "").strip().casefold() for field in ("authors", "year", "title", "source", "section", "subsection", "page"))
+    def __init__(self, sources):
+        self.sources = sources
+        self.unique_sources = []
+        self._new_ids = {}
+        self._key_ids = {}
+        self._pending = ""
 
-        if key not in metadata_keys:
-            new_id = len(unique_sources) + 1
-            metadata_keys[key] = new_id
-            unique_sources.append(node)
+    def feed(self, text: str) -> str:
+        """Add streamed text and return the part that is ready to print."""
+        self._pending += text
+        partial = PARTIAL_CITATION_RE.search(self._pending)
+        cut = partial.start() if partial else len(self._pending)
+        ready, self._pending = self._pending[:cut], self._pending[cut:]
+        return CITATION_RE.sub(self._replace, ready)
 
-        citation_map[old_id] = metadata_keys[key]
+    def flush(self) -> str:
+        """Return the text still held back, once the stream has ended."""
+        ready, self._pending = self._pending, ""
+        return CITATION_RE.sub(self._replace, ready)
 
-    return unique_sources, citation_map
-
-
-def remap_citations(answer: str, citation_map: dict[int, int]) -> str:
-    def replace(match):
-        old_ids = [int(value.strip()) for value in match.group(1).split(",")]
-
+    def _replace(self, match) -> str:
         new_ids = []
-        for old_id in old_ids:
-            new_id = citation_map.get(old_id)
-            if new_id is not None and new_id not in new_ids:
-                new_ids.append(new_id)
+        for value in match.group(1).split(","):
+            old_id = int(value)
+            if 1 <= old_id <= len(self.sources):
+                new_id = self._new_id(old_id)
+                if new_id not in new_ids:
+                    new_ids.append(new_id)
+        # Citations to excerpts that do not exist are left unchanged
+        return "[" + ", ".join(map(str, new_ids)) + "]" if new_ids else match.group(0)
 
-        if not new_ids:
-            return match.group(0)
-
-        return "[" + ", ".join(map(str, new_ids)) + "]"
-
-    return re.sub(r"\[(\d+(?:\s*,\s*\d+)*)\]", replace, answer)
+    def _new_id(self, old_id: int) -> int:
+        if old_id not in self._new_ids:
+            node = self.sources[old_id - 1]
+            meta = node.node.metadata
+            key = tuple(str(meta.get(field) or "").strip().casefold() for field in ("authors", "year", "title", "source", "section", "subsection", "page"))
+            if key not in self._key_ids:
+                self.unique_sources.append(node)
+                self._key_ids[key] = len(self.unique_sources)
+            self._new_ids[old_id] = self._key_ids[key]
+        return self._new_ids[old_id]
 
 
 def build_context(nodes) -> str:
