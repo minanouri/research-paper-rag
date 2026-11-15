@@ -113,6 +113,26 @@ def cmd_chat(args):
             print(f"Error: {e}")
 
 
+def cmd_eval(args):
+    from .evaluate import check_quotes, evaluate, load_questions, print_report, save_result
+
+    try:
+        questions = load_questions(args.questions)
+    except (OSError, ValueError) as e:
+        sys.exit(str(e))
+    warnings = check_quotes(questions)
+    for w in warnings:
+        print(f"WARNING: {w}")
+    if warnings and not args.ignore_missing:
+        sys.exit("Fix the quotes above (or pass --ignore-missing); they can never be matched.")
+
+    print(f"Evaluating {len(questions)} questions{' with answers' if args.answers else ''} ...")
+    result = evaluate(questions, with_answers=args.answers)
+    print_report(result)
+    if not args.no_save:
+        print(f"\nSaved to {save_result(result)}")
+
+
 def cmd_list(_):
     from .index import list_papers
 
@@ -141,6 +161,13 @@ def main():
 
     c = sub.add_parser("chat", parents=[filters], help="Ask several questions, loading the models only once")
     c.set_defaults(fn=cmd_chat)
+
+    e = sub.add_parser("eval", help="Evaluate retrieval against a labeled question set")
+    e.add_argument("--questions", default=str(config.ROOT / "eval" / "questions.jsonl"), help="Question file (JSONL)")
+    e.add_argument("--answers", action="store_true", help="Also generate answers and score citations")
+    e.add_argument("--ignore-missing", action="store_true", help="Run even if some evidence quotes are not found")
+    e.add_argument("--no-save", action="store_true", help="Do not save results to eval/results/")
+    e.set_defaults(fn=cmd_eval)
 
     l = sub.add_parser("list", help="List indexed papers")
     l.set_defaults(fn=cmd_list)
