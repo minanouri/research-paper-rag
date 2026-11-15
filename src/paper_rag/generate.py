@@ -106,11 +106,14 @@ def ask(query: str, paper_id: str | None = None, section_type: str | None = None
     nodes = retrieve(query, paper_id, section_type, year_min)
     if not nodes:
         return iter(["No indexed chunks matched."]), []
+    return answer_from_nodes(query, nodes), nodes
 
+
+def answer_from_nodes(query: str, nodes):
     no_think_suffix = " /no_think" if config.LLM_MODEL.startswith("qwen3") else ""
     messages = [ChatMessage(role="system", content=SYSTEM), 
                 ChatMessage(role="user", content=f"Excerpts:\n{build_context(nodes)}\n\nQuestion: {query}{no_think_suffix}")]
     
     stream = get_llm().stream_chat(messages)
     
-    return (chunk.delta for chunk in stream if chunk.delta), nodes
+    return (chunk.delta for chunk in stream if chunk.delta)
