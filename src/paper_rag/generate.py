@@ -2,7 +2,7 @@ from llama_index.core.llms import ChatMessage
 import re
 
 from .metadata import get_llm
-from .retrieve import retrieve
+from .retrieve import hybrid_search, reranker
 from . import config
 
 
@@ -118,11 +118,61 @@ def build_context(nodes) -> str:
     return context
 
 
-def ask(query: str, paper_id: str | None = None, section_type: str | None = None, year_min: int | None = None):
-    nodes = retrieve(query, paper_id, section_type, year_min)
+SOURCE_FIELDS = ("paper_id", "title", "authors", "year", "section", "subsection", "page", "source")
+
+
+def source_info(node, source_id: int) -> dict:
+    """A retrieved node as a plain dict, numbered as in the prompt."""
+    meta = node.node.metadata
+    return {"id": source_id, **{f: meta.get(f) for f in SOURCE_FIELDS},
+            "excerpt": node.node.get_content(), "score": None if node.score is None else float(node.score)}
+
+
+def answer_events(query: str, paper_id: str | None = None, section_type: str | None = None,
+                  year_min: int | None = None, renumber: bool = True):
+    """Answer a question as a stream of events (dicts with a "type" key), in this order:
+
+    - status:  {"stage": "searching" | "reranking" | "writing"}
+    - sources: {"sources": [...]}, the reranked excerpts numbered 1..n as given to the model
+    - token:   {"text": ...}, answer text; citations are renumbered unless renumber is False
+    - done:    {"cited": [...]}, the cited sources. With renumber, "id" is the new number and
+               "retrieved_id" the number in the sources event; without it, "id" is the model's number.
+
+    If nothing matches, sources is empty and a single token carries the message.
+    """
+    yield {"type": "status", "stage": "searching"}
+    nodes = hybrid_search(query, paper_id, section_type, year_min)
+    if nodes:
+        yield {"type": "status", "stage": "reranking"}
+        nodes = reranker().postprocess_nodes(nodes, query_str=query)
+    sources = [source_info(n, i) for i, n in enumerate(nodes, 1)]
+    yield {"type": "sources", "sources": sources}
     if not nodes:
-        return iter(["No indexed chunks matched."]), []
-    return answer_from_nodes(query, nodes), nodes
+        yield {"type": "token", "text": "No indexed chunks matched."}
+        yield {"type": "done", "cited": []}
+        return
+
+    yield {"type": "status", "stage": "writing"}
+    tokens = answer_from_nodes(query, nodes)
+    if not renumber:
+        answer = ""
+        for token in tokens:
+            answer += token
+            yield {"type": "token", "text": token}
+        cited = [sources[i - 1] for i in extract_citations(answer) if 1 <= i <= len(sources)]
+        yield {"type": "done", "cited": cited}
+        return
+
+    renumberer = CitationRenumberer(nodes)
+    for token in tokens:
+        if text := renumberer.feed(token):
+            yield {"type": "token", "text": text}
+    if text := renumberer.flush():
+        yield {"type": "token", "text": text}
+    retrieved_id = {id(n): i for i, n in enumerate(nodes, 1)}
+    cited = [{**sources[retrieved_id[id(n)] - 1], "id": new_id, "retrieved_id": retrieved_id[id(n)]}
+             for new_id, n in enumerate(renumberer.unique_sources, 1)]
+    yield {"type": "done", "cited": cited}
 
 
 def answer_from_nodes(query: str, nodes):

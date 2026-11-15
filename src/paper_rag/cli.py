@@ -47,41 +47,34 @@ def _resolve_paper(ref: str | None) -> str | None:
 
 
 def answer_question(question: str, paper_id: str | None, args) -> None:
-    from .generate import CitationRenumberer, ask, extract_citations, source_line
+    from .generate import answer_events, source_line
 
-    tokens, sources = ask(question, paper_id, args.section_type, args.year_min)
+    sources = []
+    for event in answer_events(question, paper_id, args.section_type, args.year_min,
+                               renumber=not args.show_retrieved):
+        if event["type"] == "sources":
+            sources = event["sources"]
+        elif event["type"] == "token":
+            print(event["text"], end="", flush=True)
+        elif event["type"] == "done":
+            print()
+            cited = event["cited"]
     if not sources:
-        print("".join(tokens))
         return
 
     if args.show_retrieved:
-        # Print the answer as it streams, keeping the excerpt numbers the model used
-        answer = ""
-        for token in tokens:
-            print(token, end="", flush=True)
-            answer += token
-        print()
-        cited_ids = extract_citations(answer)
+        cited_ids = {s["id"] for s in cited}
         print("\nRetrieved sources:")
-
-        for i, node in enumerate(sources, 1):
-            status = " (cited)" if i in cited_ids else " (not cited)"
-            print(f"  [{i}] {source_line(node.node.metadata)}{status}")
-
+        for s in sources:
+            status = " (cited)" if s["id"] in cited_ids else " (not cited)"
+            print(f"  [{s['id']}] {source_line(s)}{status}")
     else:
-        # Print the answer as it streams, renumbering citations to match the cited sources list
-        renumberer = CitationRenumberer(sources)
-        for token in tokens:
-            print(renumberer.feed(token), end="", flush=True)
-        print(renumberer.flush())
         print("\nCited sources:")
-
-        if not renumberer.unique_sources:
+        if not cited:
             print("  No valid inline citations were found in the answer.")
             return
-
-        for new_id, node in enumerate(renumberer.unique_sources, 1):
-            print(f"  [{new_id}] {source_line(node.node.metadata)}")
+        for s in cited:
+            print(f"  [{s['id']}] {source_line(s)}")
 
 
 def cmd_ask(args):
