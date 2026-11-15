@@ -7,14 +7,13 @@ import torch
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
 
 DEVICE = "mps" if torch.backends.mps.is_available() else ("cuda" if torch.cuda.is_available() else "cpu")
-# Half precision for the embedder and reranker on GPU (about half the memory); CPU stays fp32
 USE_FP16 = DEVICE != "cpu"
 
 ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = ROOT / "data"
 PDF_DIR = ROOT / "papers"
-CHROMA_DIR = DATA_DIR / "chroma"
-DOCSTORE_PATH = DATA_DIR / "docstore.json"
+QDRANT_DIR = DATA_DIR / "qdrant"
+QDRANT_URL = os.environ.get("QDRANT_URL")
 REGISTRY_PATH = DATA_DIR / "papers.json"
 META_CACHE_PATH = DATA_DIR / "meta_cache.json"
 COLLECTION = "papers"

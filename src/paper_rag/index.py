@@ -1,14 +1,30 @@
+import atexit
+import warnings
+from collections import Counter
 from functools import lru_cache
+from typing import Iterator
 
-import chromadb
+import bm25s
+import mmh3
+import Stemmer
 import torch
-from llama_index.core import VectorStoreIndex
-from llama_index.core.storage.docstore import SimpleDocumentStore
+from llama_index.core.schema import MetadataMode, TextNode
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
-from llama_index.vector_stores.chroma import ChromaVectorStore
+from qdrant_client import QdrantClient, models
 
 from . import config
 from .metadata import PaperMeta, read_json
+
+# Named vectors in the Qdrant collection
+DENSE, SPARSE = "dense", "bm25"
+# BM25 parameters
+K1, B = 1.5, 0.75
+# Payload fields used as retrieval filters
+FILTER_FIELDS = {"paper_id": models.PayloadSchemaType.KEYWORD,
+                 "section_type": models.PayloadSchemaType.KEYWORD,
+                 "year": models.PayloadSchemaType.INTEGER}
+
+_stemmer = Stemmer.Stemmer("english")
 
 
 @lru_cache
@@ -18,22 +34,75 @@ def embed_model():
                                 model_kwargs=model_kwargs)
 
 
-def load_docstore() -> SimpleDocumentStore:
-    if config.DOCSTORE_PATH.exists():
-        return SimpleDocumentStore.from_persist_path(str(config.DOCSTORE_PATH))
-    return SimpleDocumentStore()
+@lru_cache
+def client() -> QdrantClient:
+    if config.QDRANT_URL:
+        return QdrantClient(url=config.QDRANT_URL)
+    config.QDRANT_DIR.mkdir(parents=True, exist_ok=True)
+    local = QdrantClient(path=str(config.QDRANT_DIR))
+    # Close before interpreter shutdown
+    atexit.register(local.close)
+    return local
 
 
-def _vector_store() -> tuple[ChromaVectorStore, chromadb.Collection]:
-    config.CHROMA_DIR.mkdir(parents=True, exist_ok=True)
-    client = chromadb.PersistentClient(path=str(config.CHROMA_DIR))
-    coll = client.get_or_create_collection(config.COLLECTION, metadata={"hnsw:space": "cosine"})
-    return ChromaVectorStore(chroma_collection=coll), coll
+def has_index() -> bool:
+    return client().collection_exists(config.COLLECTION)
 
 
-def get_index() -> VectorStoreIndex:
-    vs, _ = _vector_store()
-    return VectorStoreIndex.from_vector_store(vs, embed_model=embed_model())
+def _tokens(texts: list[str]) -> list[list[str]]:
+    return bm25s.tokenize(texts, stopwords="en", stemmer=_stemmer, return_ids=False, show_progress=False)
+
+
+def _bm25_doc(tokens: list[str], avgdl: float) -> models.SparseVector:
+    tf = Counter(mmh3.hash(t, signed=False) for t in tokens)
+    norm = K1 * (1 - B + B * len(tokens) / avgdl)
+    return models.SparseVector(indices=list(tf), values=[c / (c + norm) for c in tf.values()])
+
+
+def bm25_query(query: str) -> models.SparseVector:
+    tf = Counter(mmh3.hash(t, signed=False) for t in _tokens([query])[0])
+    return models.SparseVector(indices=list(tf), values=[float(c) for c in tf.values()])
+
+
+def _ensure_collection(dim: int) -> None:
+    if has_index():
+        return
+    client().create_collection(
+        config.COLLECTION,
+        vectors_config={DENSE: models.VectorParams(size=dim, distance=models.Distance.COSINE)},
+        sparse_vectors_config={SPARSE: models.SparseVectorParams(modifier=models.Modifier.IDF)})
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")  # Local mode warns that payload indexes have no effect there
+        for field, schema in FILTER_FIELDS.items():
+            client().create_payload_index(config.COLLECTION, field, schema)
+
+
+def _point(node, vector: list[float]) -> models.PointStruct:
+    return models.PointStruct(id=node.node_id, vector={DENSE: vector},
+                              payload={**node.metadata, "_node": node.to_json()})
+
+
+def iter_nodes() -> Iterator[TextNode]:
+    if not has_index():
+        return
+    offset = None
+    while True:
+        points, offset = client().scroll(config.COLLECTION, limit=256, offset=offset, with_payload=["_node"])
+        for p in points:
+            yield TextNode.from_json(p.payload["_node"])
+        if offset is None:
+            return
+
+
+def refresh_bm25() -> None:
+    nodes = list(iter_nodes())
+    if not nodes:
+        return
+    tokens = _tokens([n.get_content(metadata_mode=MetadataMode.EMBED) for n in nodes])
+    avgdl = sum(map(len, tokens)) / len(tokens)
+    points = [models.PointVectors(id=n.node_id, vector={SPARSE: _bm25_doc(t, avgdl)}) for n, t in zip(nodes, tokens)]
+    for i in range(0, len(points), 256):
+        client().update_vectors(config.COLLECTION, points=points[i:i + 256], wait=True)
 
 
 def add_paper(meta: PaperMeta, nodes) -> None:
@@ -41,27 +110,25 @@ def add_paper(meta: PaperMeta, nodes) -> None:
     if bad:
         raise ValueError(f"{len(bad)} nodes have mismatched paper_id: {bad[0].metadata.get('paper_id')} != {meta.paper_id}")
 
-    vs, coll = _vector_store()
-    docstore = load_docstore()
+    vectors = embed_model().get_text_embedding_batch(
+        [n.get_content(metadata_mode=MetadataMode.EMBED) for n in nodes], show_progress=True)
 
-    coll.delete(where={"paper_id": meta.paper_id})
-    coll.delete(where={"content_hash": meta.content_hash})
-    
-    for node_id, node in list(docstore.docs.items()):
-        if node.metadata.get("paper_id") == meta.paper_id or node.metadata.get("content_hash") == meta.content_hash:
-            docstore.delete_document(node_id)
-
-    index = VectorStoreIndex.from_vector_store(vs, embed_model=embed_model(), show_progress=True)
-    index.insert_nodes(nodes)
-
-    docstore.add_documents(nodes)
-    config.DOCSTORE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    docstore.persist(str(config.DOCSTORE_PATH))
+    if has_index():
+        old = models.Filter(should=[
+            models.FieldCondition(key="paper_id", match=models.MatchValue(value=meta.paper_id)),
+            models.FieldCondition(key="content_hash", match=models.MatchValue(value=meta.content_hash))])
+        client().delete(config.COLLECTION, points_selector=models.FilterSelector(filter=old), wait=True)
+    if nodes:
+        _ensure_collection(len(vectors[0]))
+        client().upload_points(config.COLLECTION, [_point(n, v) for n, v in zip(nodes, vectors)], wait=True)
+    refresh_bm25()
 
 
 def list_papers() -> list[dict]:
-    counts: dict[str, int] = {}
-    for node in load_docstore().docs.values():
-        pid = node.metadata.get("paper_id", "?")
-        counts[pid] = counts.get(pid, 0) + 1
-    return [{**m, "chunks": counts.get(pid, 0)} for pid, m in read_json(config.REGISTRY_PATH).items()]
+    def chunks(pid: str) -> int:
+        if not has_index():
+            return 0
+        flt = models.Filter(must=[models.FieldCondition(key="paper_id", match=models.MatchValue(value=pid))])
+        return client().count(config.COLLECTION, count_filter=flt, exact=True).count
+
+    return [{**m, "chunks": chunks(pid)} for pid, m in read_json(config.REGISTRY_PATH).items()]

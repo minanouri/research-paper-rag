@@ -1,13 +1,14 @@
 from functools import lru_cache
 
 from llama_index.core.postprocessor import SentenceTransformerRerank
-from llama_index.core.retrievers import QueryFusionRetriever
-from llama_index.core.vector_stores import FilterOperator, MetadataFilter, MetadataFilters
-from llama_index.retrievers.bm25 import BM25Retriever
+from llama_index.core.schema import NodeWithScore, TextNode
+from qdrant_client import models
 
 from . import config
-from .index import get_index, load_docstore
-from .metadata import get_llm
+from .index import DENSE, SPARSE, bm25_query, client, embed_model, has_index
+
+# Reciprocal rank fusion constant
+RRF_K = 60
 
 
 @lru_cache
@@ -19,44 +20,61 @@ def reranker():
     return rr
 
 
-def _matches(meta: dict, paper_id, section_type, year_min) -> bool:
-    if paper_id and meta.get("paper_id") != paper_id:
-        return False
-    if section_type and meta.get("section_type") != section_type:
-        return False
-    if year_min and (meta.get("year") or 0) < year_min:
-        return False
-    return True
-
-
-def build_retrievers(paper_id: str | None = None, section_type: str | None = None, year_min: int | None = None):
-    nodes = [n for n in load_docstore().docs.values() if _matches(n.metadata, paper_id, section_type, year_min)]
-    if not nodes:
-        return None
-
-    fl = []
+def _filter(paper_id, section_type, year_min) -> models.Filter | None:
+    must = []
     if paper_id:
-        fl.append(MetadataFilter(key="paper_id", value=paper_id))
+        must.append(models.FieldCondition(key="paper_id", match=models.MatchValue(value=paper_id)))
     if section_type:
-        fl.append(MetadataFilter(key="section_type", value=section_type))
+        must.append(models.FieldCondition(key="section_type", match=models.MatchValue(value=section_type)))
     if year_min:
-        fl.append(MetadataFilter(key="year", value=year_min, operator=FilterOperator.GTE))
-    filters = MetadataFilters(filters=fl) if fl else None
+        must.append(models.FieldCondition(key="year", range=models.Range(gte=year_min)))
+    return models.Filter(must=must) if must else None
 
-    dense = get_index().as_retriever(similarity_top_k=config.TOP_K_DENSE, filters=filters)
-    bm25 = BM25Retriever.from_defaults(nodes=nodes, similarity_top_k=min(config.TOP_K_BM25, len(nodes)))
-    fusion = QueryFusionRetriever([dense, bm25], 
-                                  similarity_top_k=config.FUSION_TOP_K, 
-                                  num_queries=1, 
-                                  mode="reciprocal_rerank", 
-                                  use_async=False, 
-                                  llm=get_llm())
-    return dense, bm25, fusion
+
+def _prefetches(query: str, flt) -> list[models.Prefetch]:
+    """The dense and BM25 candidate searches (BM25 is skipped if the query has no indexable terms)."""
+    out = [models.Prefetch(query=embed_model().get_query_embedding(query), using=DENSE,
+                           limit=config.TOP_K_DENSE, filter=flt)]
+    sparse = bm25_query(query)
+    if sparse.indices:
+        out.append(models.Prefetch(query=sparse, using=SPARSE, limit=config.TOP_K_BM25, filter=flt))
+    return out
+
+
+def _nodes(points) -> list[NodeWithScore]:
+    return [NodeWithScore(node=TextNode.from_json(p.payload["_node"]), score=p.score) for p in points]
+
+
+def _fuse(prefetches, flt) -> list[NodeWithScore]:
+    res = client().query_points(config.COLLECTION, prefetch=prefetches, query=models.RrfQuery(rrf=models.Rrf(k=RRF_K)),
+                                query_filter=flt, limit=config.FUSION_TOP_K, with_payload=["_node"])
+    return _nodes(res.points)
+
+
+def hybrid_search(query: str, paper_id: str | None = None, section_type: str | None = None,
+                  year_min: int | None = None) -> list[NodeWithScore]:
+    if not has_index():
+        return []
+    flt = _filter(paper_id, section_type, year_min)
+    return _fuse(_prefetches(query, flt), flt)
+
+
+def search_stages(query: str, paper_id: str | None = None, section_type: str | None = None,
+                  year_min: int | None = None) -> dict[str, list[NodeWithScore]]:
+    """Dense, BM25 and fused results for one query, so the eval can score each stage."""
+    if not has_index():
+        return {}
+    flt = _filter(paper_id, section_type, year_min)
+    prefetches = _prefetches(query, flt)
+    stages = {"dense": [], "bm25": []}
+    for p in prefetches:
+        res = client().query_points(config.COLLECTION, query=p.query, using=p.using, limit=p.limit,
+                                    query_filter=flt, with_payload=["_node"])
+        stages["dense" if p.using == DENSE else "bm25"] = _nodes(res.points)
+    stages["fusion"] = _fuse(prefetches, flt)
+    return stages
 
 
 def retrieve(query: str, paper_id: str | None = None, section_type: str | None = None, year_min: int | None = None):
-    retrievers = build_retrievers(paper_id, section_type, year_min)
-    if retrievers is None:
-        return []
-    _, _, fusion = retrievers
-    return reranker().postprocess_nodes(fusion.retrieve(query), query_str=query)
+    nodes = hybrid_search(query, paper_id, section_type, year_min)
+    return reranker().postprocess_nodes(nodes, query_str=query) if nodes else []

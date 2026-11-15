@@ -56,9 +56,9 @@ def _matched(node, evidence: list[dict]) -> set[int]:
 
 
 def check_quotes(questions: list[dict]) -> list[str]:
-    from .index import load_docstore
+    from .index import iter_nodes
 
-    docs = list(load_docstore().docs.values())
+    docs = list(iter_nodes())
     warnings = []
     for q in questions:
         for e in q["evidence"]:
@@ -92,7 +92,7 @@ def _evaluate_answer(q: dict, nodes) -> dict:
 
 
 def evaluate(questions: list[dict], with_answers: bool = False, progress=print) -> dict:
-    from .retrieve import build_retrievers, reranker
+    from .retrieve import reranker, search_stages
 
     stage_k = {"dense": config.TOP_K_DENSE, "bm25": config.TOP_K_BM25,
                "fusion": config.FUSION_TOP_K, "rerank": config.RERANK_TOP_N}
@@ -100,14 +100,12 @@ def evaluate(questions: list[dict], with_answers: bool = False, progress=print) 
     for n, q in enumerate(questions, 1):
         progress(f"  [{n}/{len(questions)}] {q['id']}")
         f = q["filters"]
-        retrievers = build_retrievers(f.get("paper_id"), f.get("section_type"), f.get("year_min"))
+        results = search_stages(q["q"], f.get("paper_id"), f.get("section_type"), f.get("year_min"))
         row = {"id": q["id"], "q": q["q"], "type": q["type"], "stages": {}}
         reranked = []
-        if retrievers:
-            dense, bm25, fusion = retrievers
-            fused = fusion.retrieve(q["q"])
-            results = {"dense": dense.retrieve(q["q"]), "bm25": bm25.retrieve(q["q"]), "fusion": fused}
-            reranked = reranker().postprocess_nodes(fused, query_str=q["q"])
+        if results:
+            if results["fusion"]:
+                reranked = reranker().postprocess_nodes(results["fusion"], query_str=q["q"])
             results["rerank"] = reranked
             if q["evidence"]:
                 row["stages"] = {s: _stage(results[s], q["evidence"], stage_k[s]) for s in stage_k}
