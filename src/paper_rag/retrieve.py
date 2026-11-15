@@ -29,10 +29,10 @@ def _matches(meta: dict, paper_id, section_type, year_min) -> bool:
     return True
 
 
-def retrieve(query: str, paper_id: str | None = None, section_type: str | None = None, year_min: int | None = None):
+def build_retrievers(paper_id: str | None = None, section_type: str | None = None, year_min: int | None = None):
     nodes = [n for n in load_docstore().docs.values() if _matches(n.metadata, paper_id, section_type, year_min)]
     if not nodes:
-        return []
+        return None
 
     fl = []
     if paper_id:
@@ -51,4 +51,12 @@ def retrieve(query: str, paper_id: str | None = None, section_type: str | None =
                                   mode="reciprocal_rerank", 
                                   use_async=False, 
                                   llm=get_llm())
+    return dense, bm25, fusion
+
+
+def retrieve(query: str, paper_id: str | None = None, section_type: str | None = None, year_min: int | None = None):
+    retrievers = build_retrievers(paper_id, section_type, year_min)
+    if retrievers is None:
+        return []
+    _, _, fusion = retrievers
     return reranker().postprocess_nodes(fusion.retrieve(query), query_str=query)
