@@ -172,7 +172,8 @@ def _arxiv(arxiv_id: str) -> dict:
 
 @lru_cache
 def get_llm():
-    return Ollama(model=config.LLM_MODEL, request_timeout=300.0, context_window=config.CONTEXT_WINDOW, temperature=0.1)
+    # thinking=False: newer Ollama versions ignore the /no_think prompt suffix and think anyway
+    return Ollama(model=config.LLM_MODEL, request_timeout=300.0, context_window=config.CONTEXT_WINDOW, temperature=0.1, thinking=False)
 
 
 def _llm_extract(first_page: str) -> dict:
