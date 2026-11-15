@@ -11,3 +11,5 @@ sentence-transformers
 docling
 pymupdf
 torch
+fastapi
+uvicorn

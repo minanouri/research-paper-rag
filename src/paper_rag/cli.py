@@ -136,6 +136,11 @@ def cmd_list(_):
         print(f"{m['paper_id']}  {m.get('year') or '?'}  {m.get('title') or m['source']}  ({m['chunks']} chunks)")
 
 
+def cmd_serve(args):
+    import uvicorn
+    uvicorn.run("paper_rag.api:app", host=args.host, port=args.port, workers=1)
+
+
 def main():
     p = argparse.ArgumentParser(prog="paper-rag")
     sub = p.add_subparsers(required=True)
@@ -167,6 +172,11 @@ def main():
 
     l = sub.add_parser("list", help="List indexed papers")
     l.set_defaults(fn=cmd_list)
+
+    s = sub.add_parser("serve", help="Run the HTTP API for the web interface")
+    s.add_argument("--host", default="127.0.0.1")
+    s.add_argument("--port", type=int, default=8000)
+    s.set_defaults(fn=cmd_serve)
 
     args = p.parse_args()
     sys.exit(args.fn(args) or 0)
