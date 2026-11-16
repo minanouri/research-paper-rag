@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from "react";
-import type { AnswerEvent, AskFilters, Paper } from "./api";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { AnswerEvent, AskFilters, Paper, Source } from "./api";
 import { ask, citeLabel, fetchPapers } from "./api";
 import { TurnView, type Turn } from "./Answer";
+import { SourcePanel } from "./SourcePanel";
 
 const sectionName = (s: string) => s.charAt(0).toUpperCase() + s.slice(1).replaceAll("_", " ");
 const selectClass =
@@ -33,6 +34,7 @@ export default function App() {
 
   const [question, setQuestion] = useState("");
   const [turns, setTurns] = useState<Turn[]>([]);
+  const [selected, setSelected] = useState<Source | null>(null);
   const [busy, setBusy] = useState(false);
 
   const controller = useRef<AbortController | null>(null);
@@ -53,6 +55,8 @@ export default function App() {
     const el = scroller.current;
     if (el && el.scrollHeight - el.scrollTop - el.clientHeight < 160) el.scrollTop = el.scrollHeight;
   }, [turns]);
+
+  const closePanel = useCallback(() => setSelected(null), []);
 
   async function submit() {
     const q = question.trim();
@@ -131,9 +135,6 @@ export default function App() {
             {turns.length === 0 && !loadError && (
               <div className="space-y-3 pt-8">
                 <h2 className="text-2xl font-semibold">Ask your papers a question</h2>
-                <p className="text-stone-600">
-                  Answers cite the excerpts they use. Hover over a citation to see its source.
-                </p>
                 {papers.length > 0 && (
                   <ul className="space-y-1 pt-2 text-sm text-stone-600">
                     {papers.map((p) => (
@@ -147,7 +148,7 @@ export default function App() {
               </div>
             )}
             {turns.map((t) => (
-              <TurnView key={t.id} turn={t} />
+              <TurnView key={t.id} turn={t} onOpen={setSelected} selected={selected} />
             ))}
           </div>
         </main>
@@ -195,6 +196,7 @@ export default function App() {
         </form>
       </div>
 
+      {selected && <SourcePanel source={selected} onClose={closePanel} />}
     </div>
   );
 }

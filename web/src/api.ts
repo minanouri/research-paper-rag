@@ -91,6 +91,11 @@ export async function ask(
   }
 }
 
+export function pdfUrl(paperId: string, page: number | null): string {
+  const path = paperId.split("/").map(encodeURIComponent).join("/");
+  return `/pdf/${path}${page ? `#page=${page}` : ""}`;
+}
+
 export function citeLabel(authors: string | null, year: number | null): string {
   const names = (authors ?? "").split(";").map((a) => a.trim()).filter(Boolean);
   const last = (n: string) => (n.includes(",") ? n.split(",")[0] : n.split(/\s+/).at(-1)!);

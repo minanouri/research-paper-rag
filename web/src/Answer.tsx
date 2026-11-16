@@ -20,7 +20,7 @@ const STAGE_TEXT: Record<Stage, string> = {
 
 const CITATION_RE = /\[(\d+(?:\s*,\s*\d+)*)\]/g;
 
-function AnswerText({ text, cited }: { text: string; cited: Source[] | null }) {
+function AnswerText({ text, cited, onOpen }: { text: string; cited: Source[] | null; onOpen: (s: Source) => void }) {
   const parts: ReactNode[] = [];
   let last = 0;
   for (const m of text.matchAll(CITATION_RE)) {
@@ -34,7 +34,7 @@ function AnswerText({ text, cited }: { text: string; cited: Source[] | null }) {
       parts.push(
         <span key={m.index} className="whitespace-nowrap">
           {ids.map((id, i) => (
-            <CitationChip key={id} id={id} source={sources[i]} />
+            <CitationChip key={id} id={id} source={sources[i]} onOpen={onOpen} />
           ))}
         </span>,
       );
@@ -45,24 +45,31 @@ function AnswerText({ text, cited }: { text: string; cited: Source[] | null }) {
   return <div className="whitespace-pre-wrap leading-relaxed">{parts}</div>;
 }
 
-function CitationChip({ id, source }: { id: number; source?: Source }) {
+function CitationChip({ id, source, onOpen }: { id: number; source?: Source; onOpen: (s: Source) => void }) {
   const base = "mx-0.5 inline-flex h-5 min-w-5 items-center justify-center rounded px-1 align-baseline text-xs font-semibold";
   if (!source) {
     return <span className={`${base} bg-stone-200 text-stone-500`}>{id}</span>;
   }
   return (
-    <span
+    <button
+      type="button"
+      onClick={() => onOpen(source)}
       title={`${citeLabel(source.authors, source.year)} · ${sectionLabel(source)}${source.page ? ` · p. ${source.page}` : ""}`}
-      className={`${base} cursor-help bg-indigo-100 text-indigo-700`}
+      className={`${base} cursor-pointer bg-indigo-100 text-indigo-700 hover:bg-indigo-600 hover:text-white focus-visible:outline-2 focus-visible:outline-indigo-500`}
     >
       {id}
-    </span>
+    </button>
   );
 }
 
-function SourceRow({ source }: { source: Source }) {
+function SourceRow({ source, onOpen, active }: { source: Source; onOpen: (s: Source) => void; active: boolean }) {
   return (
-    <li className="flex gap-3 px-2 py-1.5 text-sm">
+    <li>
+      <button
+        type="button"
+        onClick={() => onOpen(source)}
+        className={`flex w-full gap-3 rounded-md px-2 py-1.5 text-left text-sm hover:bg-stone-100 ${active ? "bg-indigo-50" : ""}`}
+      >
         <span className="mt-0.5 inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded bg-indigo-100 px-1 text-xs font-semibold text-indigo-700">
           {source.id}
         </span>
@@ -70,13 +77,15 @@ function SourceRow({ source }: { source: Source }) {
           <span className="font-medium">{citeLabel(source.authors, source.year)}</span>
           <span className="text-stone-500"> · {sectionLabel(source)}{source.page ? ` · p. ${source.page}` : ""}</span>
           <span className="block truncate text-stone-500">{source.title ?? source.source}</span>
-      </span>
+        </span>
+      </button>
     </li>
   );
 }
 
-export function TurnView({ turn }: { turn: Turn }) {
+export function TurnView({ turn, onOpen, selected }: { turn: Turn; onOpen: (s: Source) => void; selected: Source | null }) {
   const busy = turn.stage === "searching" || turn.stage === "reranking" || turn.stage === "writing";
+  const isActive = (s: Source) => selected === s;
   return (
     <article className="space-y-4">
       <h2 className="text-lg font-semibold text-stone-900">{turn.question}</h2>
@@ -90,7 +99,7 @@ export function TurnView({ turn }: { turn: Turn }) {
 
       {turn.text && (
         <div className="text-[15px] text-stone-800">
-          <AnswerText text={turn.text} cited={turn.cited} />
+          <AnswerText text={turn.text} cited={turn.cited} onOpen={onOpen} />
           {busy && <span className="ml-0.5 inline-block h-4 w-1.5 animate-pulse bg-stone-400 align-text-bottom" />}
         </div>
       )}
@@ -106,7 +115,7 @@ export function TurnView({ turn }: { turn: Turn }) {
           {turn.cited.length ? (
             <ul>
               {turn.cited.map((s) => (
-                <SourceRow key={s.id} source={s} />
+                <SourceRow key={s.id} source={s} onOpen={onOpen} active={isActive(s)} />
               ))}
             </ul>
           ) : (
@@ -122,7 +131,7 @@ export function TurnView({ turn }: { turn: Turn }) {
           </summary>
           <ul className="mt-1">
             {turn.sources.map((s) => (
-              <SourceRow key={s.id} source={s} />
+              <SourceRow key={s.id} source={s} onOpen={onOpen} active={isActive(s)} />
             ))}
           </ul>
         </details>
